@@ -1,0 +1,73 @@
+#
+# Apache Guacamole with NGIXN reverse proxy and Let's Encrypt.
+# For more details see: https://github.com/8gears/containerized-guacamole
+#
+version: '3'
+
+services:
+
+  nginx-proxy:
+    image: jwilder/nginx-proxy:alpine
+    container_name: nginx-proxy-devel
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - conf:/etc/nginx/conf.d
+      - vhost:/etc/nginx/vhost.d
+      - html:/usr/share/nginx/html
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: '10m'
+        max-file: '10'
+
+  init-guac-db:
+    image: guacamole/guacamole:latest
+    command: ["/bin/sh", "-c", "test -e /init/initdb.sql && echo 'init file already exists' || /opt/guacamole/bin/initdb.sh --postgres > /init/initdb.sql" ]
+    volumes:
+      - dbinit:/init
+
+  postgres:
+    image: postgres:latest
+    restart: unless-stopped
+    volumes:
+      - dbinit:/docker-entrypoint-initdb.d
+      - dbdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-guacadb}
+      POSTGRES_PASSWORD: guaca_db_pass
+    depends_on:
+      - init-guac-db
+
+  guacd:
+    image: guacamole/guacd:latest
+    restart: unless-stopped
+
+  guac:
+    image: guacamole/guacamole:latest
+    restart: unless-stopped
+    environment:
+      GUACD_HOSTNAME: guacd
+      POSTGRES_HOSTNAME: postgres
+      POSTGRES_DATABASE: ${POSTGRES_USER:-guacadb}
+      POSTGRES_USER: ${POSTGRES_USER:-guacadb}
+      POSTGRES_PASSWORD: guaca_db_pass
+      VIRTUAL_HOST: localhost
+      # LETSENCRYPT_TEST: ${LETSENCRYPT_TEST:-false}
+      # LETSENCRYPT_HOST: ${VIRTUAL_HOST}
+      # LETSENCRYPT_EMAIL:
+    depends_on:
+      - postgres
+      - guacd
+
+volumes:
+  dbinit:
+  dbdata:
+  conf:
+  vhost:
+  html:
+  certs:
+

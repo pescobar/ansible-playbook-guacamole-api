@@ -1,0 +1,198 @@
+---
+
+- name: Testing the Guacamole API
+  hosts: localhost
+
+  vars:
+
+    # guacamole access info
+    guacamole_url: "http://localhost/guacamole"
+    guacamole_user: guacadmin
+    guacamole_password: guacadmin
+
+    # guacmole connection
+    guacamole_connection_parent_identifier: ROOT
+    guacamole_connection_name: rdp_connection_zzz
+    guacamole_connection_protocol: rdp
+    guacamole_connection_hostname: 192.168.22.33
+    guacamole_connection_username: rdp_username
+    guacamole_connection_password: rdp_p4ss
+    guacamole_connection_port: 3389
+
+    # guacmole username
+    guacamole_username_to_create: user_zzz
+    guacamole_username_to_create_passwd: pass1234
+    guacamole_username_to_create_full_name: "Marty McFly"
+    guacamole_username_to_create_mail: "username@mail.com"
+    guacamole_username_to_create_role: "sysadmin"
+    guacamole_username_to_create_organization: "scicore"
+
+
+  tasks:
+
+    # curl 'http://localhost/guacamole/api/tokens' --data 'username=guacadmin&password=guacadmin'
+    - name: Get a guacamole auth token
+      delegate_to: localhost
+      uri:
+        url: "{{ guacamole_url }}/api/tokens"
+        method: POST
+        body_format: form-urlencoded
+        body:
+          username: "{{ guacamole_user }}"
+          password: "{{ guacamole_password }}"
+      register: _guacamole_token_details
+      become: false
+      tags:
+        - connections
+        - users
+
+    - debug:
+        var: _guacamole_token_details.json.authToken
+
+    - debug:
+        var: _guacamole_token_details.json.availableDataSources
+        # this var value is "postgresql" for our tests
+
+    - debug:
+        var: _guacamole_token_details.json.dataSource
+
+
+    - name: Create a guacamole RDP connection
+      delegate_to: localhost
+      uri:
+        url: "{{ guacamole_url }}/api/session/data/{{ _guacamole_token_details.json.dataSource }}/connections?token={{ _guacamole_token_details.json.authToken }}"
+        method: POST
+        body_format: json
+        body:
+          parentIdentifier: "{{ guacamole_connection_parent_identifier }}"
+          name: "{{ guacamole_connection_name }}"
+          protocol: "{{ guacamole_connection_protocol }}"
+          parameters:
+            port: "{{ guacamole_connection_port }}"
+            hostname: "{{ guacamole_connection_hostname }}"
+            username: "{{ guacamole_connection_username }}"
+            password: "{{ guacamole_connection_password }}"
+          attributes:
+            max-connections: ""
+      register: _guacamole_created_connection_info
+      tags: connections
+
+    - debug:
+        var: _guacamole_created_connection_info
+
+    - name: Create a guacamole user
+      delegate_to: localhost
+      uri:
+        url: "{{ guacamole_url }}/api/session/data/{{ _guacamole_token_details.json.dataSource }}/users?token={{ _guacamole_token_details.json.authToken }}"
+        method: POST
+        body_format: json
+        body:
+          username: "{{ guacamole_username_to_create }}"
+          password: "{{ guacamole_username_to_create_passwd }}"
+          attributes:
+            disabled: ""
+            expired: ""
+            access-window-start: ""
+            access-window-end: ""
+            valid-from: ""
+            valid-until: ""
+            timezone: null
+            guac-full-name: "{{ guacamole_username_to_create_full_name }}"
+            guac-email-address: "{{ guacamole_username_to_create_mail }}"
+            guac-organization: "{{ guacamole_username_to_create_organization }}"
+            guac-organizational-role: "{{ guacamole_username_to_create_role }}"
+      register: _guacamole_created_user_info
+      tags: users
+
+    - debug:
+        var: _guacamole_created_user_info
+
+    - name: Allow the new created user to access the connection
+      delegate_to: localhost
+      uri:
+        url: "{{ guacamole_url }}/api/session/data/{{ _guacamole_token_details.json.dataSource }}/users/{{ _guacamole_created_user_info.json.username }}/permissions?token={{ _guacamole_token_details.json.authToken }}"
+        method: PATCH
+        body_format: json
+        body:
+          - op: "add"
+            path: "/connectionPermissions/{{ _guacamole_created_connection_info.json.identifier }}"
+            value: "READ"
+        status_code: [ "200", "204"]
+      tags: users
+
+    - name: Grant admin privileges to the new created user
+      delegate_to: localhost
+      uri:
+        url: "{{ guacamole_url }}/api/session/data/{{ _guacamole_token_details.json.dataSource }}/users/{{ _guacamole_created_user_info.json.username }}/permissions?token={{ _guacamole_token_details.json.authToken }}"
+        method: PATCH
+        body_format: json
+        body:
+          - op: "add"
+            path: "/systemPermissions"
+            value: "ADMINISTER"
+        status_code: [ "200", "204"]
+      tags: users
+
+    # - name: Create a guacamole RDP connection
+    #   delegate_to: localhost
+    #   uri:
+    #     url: "{{ guacamole_url }}/api/session/data/postgresql/connections?token={{ _guacamole_token_details.json.authToken }}"
+    #     method: POST
+    #     body_format: json
+    #     body:
+    #       parentIdentifier: "{{ guacamole_connection_parent_identifier }}"
+    #       name: "{{ guacamole_connection_name }}"
+    #       protocol: "{{ guacamole_connection_protocol }}"
+    #       parameters:
+    #         port: "{{ guacamole_connection_port }}"
+    #         read-only: ""
+    #         swap-red-blue: ""
+    #         cursor: ""
+    #         color-depth: ""
+    #         clipboard-encoding: ""
+    #         dest-port: ""
+    #         recording-exclude-output: ""
+    #         recording-exclude-mouse: ""
+    #         recording-include-keys: ""
+    #         create-recording-path: ""
+    #         enable-sftp: ""
+    #         sftp-port: ""
+    #         sftp-server-alive-interval: ""
+    #         enable-audio: ""
+    #         security: ""
+    #         disable-auth: ""
+    #         ignore-cert: ""
+    #         gateway-port: ""
+    #         server-layout: ""
+    #         console: ""
+    #         width: ""
+    #         height: ""
+    #         dpi: ""
+    #         resize-method: ""
+    #         console-audio: ""
+    #         disable-audio: ""
+    #         enable-audio-input: ""
+    #         enable-printing: ""
+    #         enable-drive: ""
+    #         create-drive-path: ""
+    #         enable-wallpaper: ""
+    #         enable-theming: ""
+    #         enable-font-smoothing: ""
+    #         enable-full-window-drag: ""
+    #         enable-desktop-composition: ""
+    #         enable-menu-animations: ""
+    #         disable-bitmap-caching: ""
+    #         disable-offscreen-caching: ""
+    #         disable-glyph-caching: ""
+    #         preconnection-id: ""
+    #         hostname: "{{ guacamole_connection_hostname }}"
+    #         username: "{{ guacamole_connection_username }}"
+    #         password: "{{ guacamole_connection_password }}"
+    #       attributes:
+    #         max-connections: ""
+    #         max-connections-per-user: ""
+    #         weight: ""
+    #         failover-only: ""
+    #         guacd-port: ""
+    #         guacd-encryption: ""
+
